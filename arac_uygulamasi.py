@@ -144,6 +144,7 @@ def load_data():
             
         df = pd.DataFrame(data[1:], columns=headers)
         
+        # --- BURASI SAYISALA (NUMERIC) ÇEVİRME YERİ ---
         df['Tarih'] = pd.to_datetime(df['Tarih'], errors='coerce')
         
         numeric_cols = ['KM Sayacı', 'Tutar', 'Taksit Sayısı', 'Litre']
@@ -160,6 +161,9 @@ def load_data():
         st.error(f"Veri yüklenirken hata oluştu: {e}")
         return create_empty_dataframe()
 
+#
+# --- BU FONKSİYON GÜNCELLENDİ (TypeError Hatası Düzeltildi) ---
+#
 def save_data(df):
     """DataFrame'i Google Sheets'e kaydeder VE session_state'i günceller."""
     
@@ -170,19 +174,24 @@ def save_data(df):
         return
         
     try:
-        df_sorted = df.sort_values(by=["Tarih", "KM Sayacı"], ascending=True)
+        # 1. Gelen SAYISAL (Numeric) veriyi sırala ve hafıza için kopyala
+        df_sorted_numeric = df.sort_values(by=["Tarih", "KM Sayacı"], ascending=True).copy()
         
-        df_sorted['Tarih'] = df_sorted['Tarih'].dt.strftime('%Y-%m-%d')
-        df_sorted['Tutar'] = df_sorted['Tutar'].apply(lambda x: f"{x:.2f}".replace('.', ','))
-        df_sorted['Litre'] = df_sorted['Litre'].apply(lambda x: f"{x:.2f}".replace('.', ','))
+        # 2. Google Sheets'e yollamak için AYRI BİR kopya oluştur
+        df_for_sheets = df_sorted_numeric.copy()
 
-        df_sorted_str = df_sorted.fillna('').astype(str)
+        # 3. Bu kopyayı METNE (String) çevir
+        df_for_sheets['Tarih'] = df_for_sheets['Tarih'].dt.strftime('%Y-%m-%d')
+        df_for_sheets['Tutar'] = df_for_sheets['Tutar'].apply(lambda x: f"{x:.2f}".replace('.', ','))
+        df_for_sheets['Litre'] = df_for_sheets['Litre'].apply(lambda x: f"{x:.2f}".replace('.', ','))
+        df_sorted_str = df_for_sheets.fillna('').astype(str)
         
+        # 4. METİN veriyi Google'a yolla
         worksheet.clear()
         worksheet.update([REQUIRED_COLUMNS] + df_sorted_str.values.tolist(), value_input_option='USER_ENTERED')
         
-        # Hafızayı (session_state) GÜNCELLE
-        st.session_state.df_main = df_sorted.copy()
+        # 5. HAFIZAYA (session_state) ORİJİNAL, SAYISAL veriyi kaydet
+        st.session_state.df_main = df_sorted_numeric
         
         st.cache_resource.clear() 
     except Exception as e:
@@ -255,14 +264,13 @@ with tab1:
                 # st.rerun() KALDIRILDI!
 
 #
-# --- 4. SEKME 2: DİĞER MASRAFLARI GİRME (HATA VEREN SATIRLAR SİLİNDİ) ---
+# --- 4. SEKME 2: DİĞER MASRAFLARI GİRME (Çökme Hatası Düzeltildi) ---
 #
 with tab2:
     st.header("Yeni Masraf Kaydı (Yakıt Dışı)")
 
     st.subheader("Masraf Detayları")
     
-    # Widget'lara 'key' (anahtar) ekledik
     tarih_input_d = st.date_input("Tarih", value=datetime.now(), key="diger_tarih")
     masraf_turu_input_d = st.selectbox("Masraf Türünü Seçin", options=KATEGORILER_DIGER, key="diger_tur") 
 
@@ -273,7 +281,7 @@ with tab2:
             min_value=0, 
             step=1, 
             value=int(df_main['KM Sayacı'].max()) if not df_main.empty else 0,
-            key="diger_km" # Buna da key verelim
+            key="diger_km"
         )
         st.info(f"'{masraf_turu_input_d}' için KM girmek, bakım ve parça ömrü takibi için önemlidir.")
     
@@ -291,7 +299,7 @@ with tab2:
         # Girdileri kontrol et
         is_km_required = masraf_turu_input_d in KM_GEREKEN_KATEGORILER
         
-        # KM'yi state'den oku (eğer görünürse)
+        # 'diger_km' key'i sadece görünürse state'de olur, o yüzden kontrol et
         km_degeri = st.session_state.diger_km if is_km_required and "diger_km" in st.session_state else None
         
         if is_km_required and (km_degeri is None or km_degeri == 0):
@@ -329,10 +337,7 @@ with tab2:
             save_data(df_main_guncel) 
             st.success(f"'{st.session_state.diger_tur}' masrafı başarıyla kaydedildi!")
             
-            # --- HATA VEREN SATIRLAR SİLİNDİ ---
-            # st.session_state.diger_tutar = 0.0
-            # st.session_state.diger_aciklama = ""
-            # st.session_state.diger_taksit = 1
+            # st.rerun() yok, çökme yok, ama alanlar temizlenmez (Seçenek 3)
 
 
 #
@@ -602,6 +607,6 @@ with tab5:
             
             df_guncel = df_guncel.replace(r'^\s*$', pd.NA, regex=True)
 
-            save_data(df_guncel) # Bu fonksiyon artık state'i de güncelliyor
+            save_data(df_guncel) 
             st.success("Veritabanı (Google Sheets) başarıyla güncellendi!")
             st.rerun()
