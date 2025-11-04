@@ -10,11 +10,11 @@ import re # Otomatik temizleme için
 
 # --- 1. UYGULA AYARLARI VE GOOGLE SHEETS BAĞLANTISI ---
 
-# Masraf kategorilerimiz
+# Masraf kategorilerimiz (GÜNCELLENDİ)
 KATEGORILER_TUMU = [
     'Yakıt', 'Köprü Otoyol', 'Trafik Cezaları', 'Tamir-Servis', 
     'Periyodik Bakım', 'Muayene', 'Lastik', 'Aksesuar', 
-    'Vergiler', 'Otopark', 'Araç Yıkama'
+    'Vergiler', 'Otopark', 'Araç Yıkama', 'Sigorta-Kasko'
 ]
 KATEGORILER_DIGER = [k for k in KATEGORILER_TUMU if k != 'Yakıt']
 
@@ -44,7 +44,7 @@ st.set_page_config(
 st.title("🚗 Araç Masraf Takip Uygulaması")
 
 #
-# --- KODUN BU BÖLÜMÜ GÜNCELLENDİ (YENİ SECRETS OKUMA YÖNTEMİ) ---
+# --- GÜNCELLENMİŞ BAĞLANTI KODU ---
 #
 @st.cache_resource(ttl=60)
 def connect_to_sheet():
@@ -123,13 +123,12 @@ def create_empty_dataframe():
     return df
 
 #
-# --- BU FONKSİYON GÜNCELLENDİ (Argüman kaldırıldı) ---
+# --- GÜNCELLENMİŞ FONKSİYON ---
 #
 @st.cache_data(ttl=60)
 def load_data():
     """Google Sheets'ten veriyi yükler ve DataFrame'e dönüştürür."""
     
-    # 1. Bağlantıyı içeride çağır
     worksheet = connect_to_sheet() 
     
     if worksheet is None:
@@ -165,12 +164,11 @@ def load_data():
         return create_empty_dataframe()
 
 #
-# --- BU FONKSİYON GÜNCELLENDİ (Argüman kaldırıldı) ---
+# --- GÜNCELLENMİŞ FONKSİYON ---
 #
 def save_data(df):
     """DataFrame'i Google Sheets'e kaydeder."""
     
-    # 1. Bağlantıyı içeride çağır
     worksheet = connect_to_sheet()
     
     if worksheet is None:
@@ -195,7 +193,6 @@ def save_data(df):
         st.error(f"Veri kaydedilirken hata oluştu: {e}")
 
 # --- Ana Uygulama Akışı (GÜNCELLENDİ) ---
-# Artık worksheet'i burada çağırmıyoruz, sadece load_data'yı çağırıyoruz
 df_main = load_data() 
 
 # --- 2. SEKMELERİ OLUŞTURMA (5 SEKMELİ YAPI) ---
@@ -250,46 +247,72 @@ with tab1:
                 
                 df_yeni = pd.DataFrame([yeni_kayit])
                 df_main = pd.concat([df_main, df_yeni], ignore_index=True)
-                save_data(df_main) # <-- GÜNCELLENDİ (worksheet argümanı kaldırıldı)
+                save_data(df_main) 
                 st.success("Yakıt masrafı başarıyla kaydedildi!")
                 st.rerun() 
 
-# --- 4. SEKME 2: DİĞER MASRAFLARI GİRME ---
+#
+# --- 4. SEKME 2: DİĞER MASRAFLARI GİRME (BU BÖLÜMÜN TAMAMI GÜNCELLENDİ) ---
+#
 with tab2:
     st.header("Yeni Masraf Kaydı (Yakıt Dışı)")
+
+    # KM girmenin zorunlu/önemli olduğu kategoriler
+    km_gereken_kategoriler = ['Periyodik Bakım', 'Tamir-Servis', 'Lastik', 'Muayene']
 
     with st.form("diger_masraf_formu", clear_on_submit=True):
         st.subheader("Masraf Detayları")
         
-        col1, col2 = st.columns(2)
-        with col1:
-            tarih_input_d = st.date_input("Tarih", value=datetime.now())
-        with col2:
-            km_input_d = st.number_input("Aracın Güncel Kilometresi", min_value=0, step=1, value=int(df_main['KM Sayacı'].max()) if not df_main.empty else 0)
-
+        tarih_input_d = st.date_input("Tarih", value=datetime.now())
         masraf_turu_input_d = st.selectbox("Masraf Türünü Seçin", options=KATEGORILER_DIGER) 
 
+        # KM Sayacını sadece GEREKLİ kategoriler için göster
+        km_input_d = None
+        if masraf_turu_input_d in km_gereken_kategoriler:
+            km_input_d = st.number_input(
+                "Aracın Güncel Kilometresi", 
+                min_value=0, 
+                step=1, 
+                value=int(df_main['KM Sayacı'].max()) if not df_main.empty else 0
+            )
+            st.info(f"'{masraf_turu_input_d}' için KM girmek, bakım ve parça ömrü takibi için önemlidir.")
+        
         col3, col4 = st.columns(2)
         with col3:
             diger_tutar_input = st.number_input("Toplam Masraf Tutarı (TL)", min_value=0.0, format="%.2f")
         with col4:
             taksit_input = st.number_input("Taksit Sayısı", min_value=1, value=1, step=1)
         
-        aciklama_input_d = st.text_input("Masraf Açıklaması (Örn: 10.000km bakımı, İspark Otopark)")
+        aciklama_input_d = st.text_input("Masraf Açıklaması (Örn: 10.000km bakımı, İspark Otopark, Kasko Poliçesi)")
 
         submitted_d = st.form_submit_button("Masrafı Kaydet")
         
         if submitted_d:
-            if km_input_d == 0 or diger_tutar_input == 0:
-                st.error("Lütfen KM ve Tutar alanlarını doldurun.")
-            elif not df_main.empty and km_input_d < df_main['KM Sayacı'].max():
-                 st.error(f"Girdiğiniz KM ({km_input_d}), son kayıtlı KM'den ({int(df_main['KM Sayacı'].max())}) düşük olamaz.")
+            # Girdileri kontrol et
+            is_km_required = masraf_turu_input_d in km_gereken_kategoriler
+            
+            if is_km_required and (km_input_d is None or km_input_d == 0):
+                st.error(f"'{masraf_turu_input_d}' için KM sayacı girmek zorunludur.")
+            elif diger_tutar_input == 0:
+                 st.error("Lütfen masraf tutarını girin.")
             elif not aciklama_input_d:
                 st.error("Lütfen bir açıklama girin (Örn: Otopark, Bakım vb.)")
             else:
+                # KM Gerekmiyorsa, son bilinen KM'yi otomatik ata
+                kaydedilecek_km = 0
+                if km_input_d is not None:
+                    # KM girildiyse ve gerekliyse, KM'nin geriye gitmediğini kontrol et
+                    if not df_main.empty and km_input_d < df_main['KM Sayacı'].max():
+                        st.error(f"Girdiğiniz KM ({km_input_d}), son kayıtlı KM'den ({int(df_main['KM Sayacı'].max())}) düşük olamaz.")
+                        st.stop() # Kaydı durdur
+                    kaydedilecek_km = km_input_d
+                else:
+                    # KM girilmediyse (çünkü sorulmadı), son bilinen KM'yi al
+                    kaydedilecek_km = int(df_main['KM Sayacı'].max()) if not df_main.empty else 0
+                
                 yeni_kayit = {
                     "Tarih": pd.to_datetime(tarih_input_d),
-                    "KM Sayacı": km_input_d,
+                    "KM Sayacı": kaydedilecek_km,
                     "Masraf Türü": masraf_turu_input_d,
                     "Tutar": diger_tutar_input,
                     "Açıklama": aciklama_input_d,
@@ -300,12 +323,14 @@ with tab2:
                 
                 df_yeni = pd.DataFrame([yeni_kayit])
                 df_main = pd.concat([df_main, df_yeni], ignore_index=True)
-                save_data(df_main) # <-- GÜNCELLENDİ (worksheet argümanı kaldırıldı)
+                save_data(df_main) 
                 st.success(f"'{masraf_turu_input_d}' masrafı başarıyla kaydedildi!")
                 st.rerun() 
 
 
-# --- 5. SEKME 3: YAKIT ANALİZİ ---
+#
+# --- 5. SEKME 3: YAKIT ANALİZİ (MANTIK HATASI DÜZELTİLDİ) ---
+#
 with tab3:
     st.header("Yakıt Tüketim Analizi")
     
@@ -314,36 +339,17 @@ with tab3:
     if len(yakit_df) < 2:
         st.info("Yakıt tüketim analizi için en az 2 'Yakıt' kaydı gereklidir.")
     else:
-        st.subheader("Genel Bakış (Tüm Zamanlar)")
         
-        ilk_km = yakit_df["KM Sayacı"].iloc[0] 
-        son_km = yakit_df["KM Sayacı"].iloc[-1]
-        toplam_gidilen_km = son_km - ilk_km
-        
-        toplam_tuketilen_litre = yakit_df["Litre"].iloc[1:].sum()
-        toplam_harcanan_para = yakit_df["Tutar"].iloc[1:].sum()
-        
-        genel_ortalama_lt_100km = 0
-        genel_ortalama_tl_km = 0
-        if toplam_gidilen_km > 0 and toplam_tuketilen_litre > 0:
-            genel_ortalama_lt_100km = (toplam_tuketilen_litre / toplam_gidilen_km) * 100
-            genel_ortalama_tl_km = toplam_harcanan_para / toplam_gidilen_km
-
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Genel Ortalama (L/100km)", f"{genel_ortalama_lt_100km:.2f}")
-        col2.metric("Genel Ortalama (TL/km)", f"{genel_ortalama_tl_km:.2f}")
-        col3.metric("Toplam Gidilen KM", f"{toplam_gidilen_km:,.0f}")
-        col4.metric("Toplam Yakıt Harcaması", f"{yakit_df['Tutar'].sum():,.2f} TL")
-
-        st.divider()
-
-        st.subheader("Dolum Periyotlarına Göre Tüketim Analizi (Full-to-Full)")
-        
+        # --- "TRIP" (FULL-TO-FULL) HESAPLAMASI (Metrikler için Öne Alındı) ---
         full_dolum_indeksleri = yakit_df[yakit_df["Dolum Türü"] == 'Full Dolum'].index.tolist()
         trip_raporlari = []
 
+        genel_ortalama_lt_100km = 0
+        genel_ortalama_tl_km = 0
+        trip_raporlari_df = pd.DataFrame() # Boş DF
+
         if len(full_dolum_indeksleri) < 2:
-            st.warning("Full-to-Full analizi için en az 2 'Full Dolum' kaydı gereklidir.")
+            st.warning("Genel ortalamaların hesaplanması için en az 2 'Full Dolum' kaydı gereklidir.")
         else:
             for i in range(len(full_dolum_indeksleri) - 1):
                 start_index = full_dolum_indeksleri[i]
@@ -366,44 +372,76 @@ with tab3:
                         "Başlangıç KM": int(baslangic_km),
                         "Bitiş KM": int(bitis_km),
                         "Gidilen KM": int(gidilen_km),
-                        "Tüketilen Litre": f"{tuketilen_litre:.2f}",
-                        "L/100km (Ort.)": f"{lt_100km:.2f}",
-                        "TL/km (Ort.)": f"{tl_km:.2f}"
+                        "Tüketilen Litre": float(tuketilen_litre),
+                        "Harcanan Para (Trip)": float(harcanan_para),
+                        "L/100km (Ort.)": float(lt_100km),
+                        "TL/km (Ort.)": float(tl_km)
                     })
-            st.dataframe(pd.DataFrame(trip_raporlari), hide_index=True, use_container_width=True)
+            
+            if trip_raporlari:
+                trip_raporlari_df = pd.DataFrame(trip_raporlari)
+                
+                # --- YENİ "GENEL BAKIŞ" HESAPLAMASI (Sadece Trip'lere göre) ---
+                toplam_trip_km = trip_raporlari_df['Gidilen KM'].sum()
+                toplam_trip_litre = trip_raporlari_df['Tüketilen Litre'].sum()
+                toplam_trip_para = trip_raporlari_df['Harcanan Para (Trip)'].sum()
+                
+                if toplam_trip_km > 0:
+                    genel_ortalama_lt_100km = (toplam_trip_litre / toplam_trip_km) * 100
+                    genel_ortalama_tl_km = toplam_trip_para / toplam_trip_km
+
+        # --- "GENEL BAKIŞ" (Tüm Zamanlar) - (DÜZENLENDİ) ---
+        st.subheader("Genel Bakış (Tamamlanmış 'Trip' Ortalamaları)")
+        st.info("Bu ortalamalar, sadece 'Full Dolum'dan 'Full Dolum'a tamamlanmış seyahatlerin verilerini yansıtır. 'Kısmi Dolum'lar bu ortalamayı anlık olarak etkilemez.")
+        
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Genel Ortalama (L/100km)", f"{genel_ortalama_lt_100km:.2f}")
+        col2.metric("Genel Ortalama (TL/km)", f"{genel_ortalama_tl_km:.2f}")
+        
+        toplam_gidilen_km_tum_zamanlar = yakit_df["KM Sayacı"].iloc[-1] - yakit_df["KM Sayacı"].iloc[0]
+        col3.metric("Toplam Gidilen KM (Tüm Kayıtlar)", f"{toplam_gidilen_km_tum_zamanlar:,.0f}")
+        col4.metric("Toplam Yakıt Harcaması (Tüm Kayıtlar)", f"{yakit_df['Tutar'].sum():,.2f} TL")
+
+        st.divider()
+
+        # --- "TRIP" (FULL-TO-FULL) TABLOSU ---
+        st.subheader("Dolum Periyotlarına Göre Tüketim Analizi (Full-to-Full)")
+        if not trip_raporlari_df.empty:
+            # Raporlama için formatlanmış DataFrame
+            trip_raporlari_display_df = trip_raporlari_df.copy()
+            trip_raporlari_display_df['Tüketilen Litre'] = trip_raporlari_display_df['Tüketilen Litre'].map('{:,.2f}'.format)
+            trip_raporlari_display_df['L/100km (Ort.)'] = trip_raporlari_display_df['L/100km (Ort.)'].map('{:,.2f}'.format)
+            trip_raporlari_display_df['TL/km (Ort.)'] = trip_raporlari_display_df['TL/km (Ort.)'].map('{:,.2f}'.format)
+            
+            st.dataframe(
+                trip_raporlari_display_df.drop(columns=['Harcanan Para (Trip)']), # Ham para verisini gösterme
+                hide_index=True, 
+                use_container_width=True
+            )
+        else:
+            st.warning("Henüz tamamlanmış bir 'Full-to-Full' periyodu yok.")
+
 
         st.divider()
         
-        st.subheader("Aylık Yakıt Gideri ve Tüketim Özeti")
+        # --- AYLIK ÖZET TABLOSU (DÜZENLENDİ - Ortalamalar Kaldırıldı) ---
+        st.subheader("Aylık Yakıt Gider Özeti")
+        st.info("Bu tablo, her ay yakıta ne kadar para harcadığınızı ve toplam kaç litre yakıt aldığınızı gösterir.")
         
         if not yakit_df.empty:
             yakit_aylik = yakit_df.set_index('Tarih').copy()
-            
-            aylik_km_max = yakit_aylik.resample('ME')['KM Sayacı'].max()
-            aylik_km_min = yakit_aylik.resample('ME')['KM Sayacı'].min()
-            aylik_gidilen_km = aylik_km_max - aylik_km_min
             
             aylik_ozet = yakit_aylik.resample('ME').agg(
                 Toplam_Harcanan_Para_TL=('Tutar', 'sum'),
                 Toplam_Alınan_Litre=('Litre', 'sum')
             )
             
-            aylik_ozet['Toplam_Gidilen_KM'] = aylik_gidilen_km
-            aylik_ozet = aylik_ozet[aylik_ozet['Toplam_Gidilen_KM'] >= 0] 
+            # Sadece harcama olan ayları göster
+            aylik_ozet = aylik_ozet[aylik_ozet['Toplam_Harcanan_Para_TL'] > 0]
             
-            aylik_ozet['Aylık_Ort_L_100km'] = 0.0
-            aylik_ozet['Aylık_Ort_TL_km'] = 0.0
-            
-            mask = aylik_ozet['Toplam_Gidilen_KM'] > 0
-            aylik_ozet.loc[mask, 'Aylık_Ort_L_100km'] = (aylik_ozet.loc[mask, 'Toplam_Alınan_Litre'] / aylik_ozet.loc[mask, 'Toplam_Gidilen_KM']) * 100
-            aylik_ozet.loc[mask, 'Aylık_Ort_TL_km'] = aylik_ozet.loc[mask, 'Toplam_Harcanan_Para_TL'] / aylik_ozet.loc[mask, 'Toplam_Gidilen_KM']
-
             aylik_ozet = aylik_ozet.rename(columns={
                 'Toplam_Harcanan_Para_TL': 'Toplam Harcanan Para (TL)',
                 'Toplam_Alınan_Litre': 'Toplam Alınan Litre',
-                'Toplam_Gidilen_KM': 'Toplam Gidilen KM',
-                'Aylık_Ort_L_100km': 'Aylık Ortalama (L/100km)',
-                'Aylık_Ort_TL_km': 'Aylık Ortalama (TL/km)'
             })
             
             aylik_ozet.index = aylik_ozet.index.strftime('%Y-%B')
@@ -451,6 +489,7 @@ with tab4:
         st.divider()
         st.subheader("Kategori Bazlı Masraf Dökümü")
 
+        # KATEGORILER_TUMU (GÜNCELLENDİĞİ İÇİN 'Sigorta-Kasko' otomatik eklenecek)
         for kategori in KATEGORILER_TUMU:
             kategori_df = df_main[df_main["Masraf Türü"] == kategori]
             
@@ -556,6 +595,6 @@ with tab5:
             
             df_guncel = df_guncel.replace(r'^\s*$', pd.NA, regex=True)
 
-            save_data(df_guncel) # <-- GÜNCELLENDİ (worksheet argümanı kaldırıldı)
+            save_data(df_guncel) 
             st.success("Veritabanı (Google Sheets) başarıyla güncellendi!")
             st.rerun()
