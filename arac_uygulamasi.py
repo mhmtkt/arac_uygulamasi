@@ -19,13 +19,10 @@ KATEGORILER_TUMU = [
 KATEGORILER_DIGER = [k for k in KATEGORILER_TUMU if k != 'Yakıt']
 KM_GEREKEN_KATEGORILER = ['Periyodik Bakım', 'Tamir-Servis', 'Lastik', 'Muayene']
 
-#
-# --- HATA BURADAYDI, DÜZELTİLDİ ---
-#
 # Google Sheets'e bağlanmak için gerekli yetki kapsamları
 SCOPES = [
-    "https://www.googleapis.com/auth/spreadsheets", # <-- DÜZELTİLDİ
-    "https://www.googleapis.com/auth/drive"         # <-- DÜZELTİLDİ
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/drive"
 ]
 
 # Google E-Tablonuzun tam adı
@@ -258,7 +255,7 @@ with tab1:
                 # st.rerun() KALDIRILDI!
 
 #
-# --- 4. SEKME 2: DİĞER MASRAFLARI GİRME (Sekme Atlama ve KM Hatası Düzeltildi) ---
+# --- 4. SEKME 2: DİĞER MASRAFLARI GİRME (HATA VEREN SATIRLAR SİLİNDİ) ---
 #
 with tab2:
     st.header("Yeni Masraf Kaydı (Yakıt Dışı)")
@@ -295,7 +292,7 @@ with tab2:
         is_km_required = masraf_turu_input_d in KM_GEREKEN_KATEGORILER
         
         # KM'yi state'den oku (eğer görünürse)
-        km_degeri = st.session_state.diger_km if is_km_required else None
+        km_degeri = st.session_state.diger_km if is_km_required and "diger_km" in st.session_state else None
         
         if is_km_required and (km_degeri is None or km_degeri == 0):
             st.error(f"'{masraf_turu_input_d}' için KM sayacı girmek zorunludur.")
@@ -332,11 +329,10 @@ with tab2:
             save_data(df_main_guncel) 
             st.success(f"'{st.session_state.diger_tur}' masrafı başarıyla kaydedildi!")
             
-            # --- MANUEL ALAN TEMİZLEME (st.rerun() yerine) ---
-            st.session_state.diger_tutar = 0.0
-            st.session_state.diger_aciklama = ""
-            st.session_state.diger_taksit = 1
-            # st.rerun() KALDIRILDI!
+            # --- HATA VEREN SATIRLAR SİLİNDİ ---
+            # st.session_state.diger_tutar = 0.0
+            # st.session_state.diger_aciklama = ""
+            # st.session_state.diger_taksit = 1
 
 
 #
