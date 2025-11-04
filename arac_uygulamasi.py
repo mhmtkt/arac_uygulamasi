@@ -5,7 +5,7 @@ from dateutil.relativedelta import relativedelta
 import gspread
 from google.oauth2.service_account import Credentials
 import os
-import json # <-- YENİ EKLENDİ
+import json
 
 # --- 1. UYGULA AYARLARI VE GOOGLE SHEETS BAĞLANTISI ---
 
@@ -42,38 +42,75 @@ st.set_page_config(
 )
 st.title("🚗 Araç Masraf Takip Uygulaması")
 
+#
+# --- KODUN BU BÖLÜMÜ GÜNCELLENDİ (DAHA İYİ HATA TESPİTİ) ---
+#
 @st.cache_resource(ttl=60)
 def connect_to_sheet():
     """Google Sheets'e bağlanır ve çalışma sayfasını döndürür."""
-    try:
-        # Streamlit Cloud'da (Deployment) - GÜNCELLENMİŞ YÖNTEM
-        creds_json_str = st.secrets["GOOGLE_SHEETS_CREDENTIALS_JSON"]
-        creds_dict = json.loads(creds_json_str) # Metni JSON (dict) olarak yükle
-        creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
-        gc = gspread.authorize(creds)
-        # st.success("Google Sheets (Cloud) bağlantısı başarılı!") # Başarı mesajını gizle
-    except:
-        # Yerel'de (Local)
-        LOCAL_CREDS_PATH = "google_credentials.json" # Yerel anahtarınızın adı
+    
+    gc = None
+    
+    # Adım 1: Kimlik bilgilerini al (Secrets veya Yerel)
+    if "GOOGLE_SHEETS_CREDENTIALS_JSON" in st.secrets:
+        # EĞER VARSA (Streamlit Cloud'dayız demektir)
+        # st.info("Streamlit Cloud 'secrets' bulundu. Bağlanmaya çalışılıyor...")
+        try:
+            creds_json_str = st.secrets["GOOGLE_SHEETS_CREDENTIALS_JSON"]
+            creds_dict = json.loads(creds_json_str) 
+            creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
+            gc = gspread.authorize(creds)
+        except json.JSONDecodeError as e:
+            st.error(f"JSON Hatası: Secrets'taki metin bozuk. Hata: {e}")
+            st.error(f"Gelen Metin (ilk 100 karakter): {creds_json_str[:100]}...")
+            st.stop()
+        except Exception as e:
+            st.error(f"Secrets ile kimlik doğrulama hatası: {e}")
+            st.stop()
+    else:
+        # EĞER YOKSA (Yereldeyiz demektir)
+        # st.info("Yerel 'google_credentials.json' dosyası aranıyor...")
+        LOCAL_CREDS_PATH = "google_credentials.json"
         
         if not os.path.exists(LOCAL_CREDS_PATH):
             st.error("Yerel 'google_credentials.json' dosyası bulunamadı.")
-            st.stop() # Hata varsa uygulamayı durdur
+            st.stop()
         
-        creds = Credentials.from_service_account_file(LOCAL_CREDS_PATH, scopes=SCOPES)
-        gc = gspread.authorize(creds)
-        # st.info("Google Sheets (Yerel) bağlantısı başarılı.") # Bilgi mesajını gizle
+        try:
+            creds = Credentials.from_service_account_file(LOCAL_CREDS_PATH, scopes=SCOPES)
+            gc = gspread.authorize(creds)
+        except Exception as e:
+            st.error(f"Yerel 'google_credentials.json' dosyası ile kimlik doğrulama hatası: {e}")
+            st.stop()
+
+    # Adım 2: E-Tabloya Bağlan
+    if gc is None:
+        st.error("Kimlik doğrulama istemcisi (gc) oluşturulamadı.")
+        st.stop()
         
     try:
         sh = gc.open(GOOGLE_SHEET_NAME)
         worksheet = sh.worksheet(WORKSHEET_NAME)
+        # st.success("Google Sheets bağlantısı başarılı!")
         return worksheet
     except gspread.exceptions.SpreadsheetNotFound:
-        st.error(f"'{GOOGLE_SHEET_NAME}' adlı Google E-Tablosu bulunamadı.")
-        return None
+        st.error(f"E-Tablo Bulunamadı: '{GOOGLE_SHEET_NAME}' adlı Google E-Tablosu bulunamadı.")
+        st.info("E-Tablo adının doğru olduğundan emin misiniz?")
+        st.stop()
     except gspread.exceptions.WorksheetNotFound:
-        st.error(f"'{WORKSHEET_NAME}' adlı çalışma sayfası bulunamadı.")
-        return None
+        st.error(f"Çalışma Sayfası Bulunamadı: '{WORKSHEET_NAME}' adlı çalışma sayfası bulunamadı.")
+        st.info("E-Tablonuzdaki sayfanın adının 'Veriler' olduğundan emin misiniz?")
+        st.stop()
+    except gspread.exceptions.APIError as e:
+        st.error(f"Google API Hatası: {e}")
+        st.info(f"'{GOOGLE_SHEET_NAME}' adlı E-Tabloyu, '{st.secrets['GOOGLE_SHEETS_CREDENTIALS_JSON']['client_email']}' e-posta adresiyle 'Düzenleyici' olarak paylaştığınıza emin misiniz?")
+        st.stop()
+    except Exception as e:
+        st.error(f"E-Tabloya bağlanırken bilinmeyen bir hata oluştu: {e}")
+        st.stop()
+#
+# --- GÜNCELLENEN BÖLÜMÜN SONU ---
+#
 
 def create_empty_dataframe():
     """Gerekli sütunlara sahip boş bir DataFrame oluşturur."""
@@ -108,7 +145,6 @@ def load_data(worksheet):
         
         numeric_cols = ['KM Sayacı', 'Tutar', 'Taksit Sayısı', 'Litre']
         for col in numeric_cols:
-            # Google Sheets'ten gelen '1.234,56' formatını düzeltmek için
             df[col] = df[col].str.replace('.', '', regex=False).str.replace(',', '.', regex=False)
             df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
 
@@ -130,9 +166,7 @@ def save_data(worksheet, df):
     try:
         df_sorted = df.sort_values(by=["Tarih", "KM Sayacı"], ascending=True)
         
-        # Google Sheets'e yazmadan önce formatı düzelt
         df_sorted['Tarih'] = df_sorted['Tarih'].dt.strftime('%Y-%m-%d')
-        # Sayısal değerleri string'e dönüştürürken Google Sheets'in seveceği formata (virgül) getir
         df_sorted['Tutar'] = df_sorted['Tutar'].apply(lambda x: f"{x:.2f}".replace('.', ','))
         df_sorted['Litre'] = df_sorted['Litre'].apply(lambda x: f"{x:.2f}".replace('.', ','))
 
@@ -186,7 +220,7 @@ with tab1:
         if submitted:
             if km_input == 0 or yakit_tutar_input == 0 or yakit_litre_input == 0:
                 st.error("Lütfen KM, Tutar ve Litre alanlarını doldurun.")
-            elif km_input < df_main['KM Sayacı'].max():
+            elif not df_main.empty and km_input < df_main['KM Sayacı'].max():
                  st.error(f"Girdiğiniz KM ({km_input}), son kayıtlı KM'den ({int(df_main['KM Sayacı'].max())}) düşük olamaz.")
             else:
                 yeni_kayit = {
@@ -204,6 +238,7 @@ with tab1:
                 df_main = pd.concat([df_main, df_yeni], ignore_index=True)
                 save_data(worksheet, df_main)
                 st.success("Yakıt masrafı başarıyla kaydedildi!")
+                st.rerun() # Sayfayı yenile
 
 # --- 4. SEKME 2: DİĞER MASRAFLARI GİRME ---
 with tab2:
@@ -233,7 +268,7 @@ with tab2:
         if submitted_d:
             if km_input_d == 0 or diger_tutar_input == 0:
                 st.error("Lütfen KM ve Tutar alanlarını doldurun.")
-            elif km_input_d < df_main['KM Sayacı'].max():
+            elif not df_main.empty and km_input_d < df_main['KM Sayacı'].max():
                  st.error(f"Girdiğiniz KM ({km_input_d}), son kayıtlı KM'den ({int(df_main['KM Sayacı'].max())}) düşük olamaz.")
             elif not aciklama_input_d:
                 st.error("Lütfen bir açıklama girin (Örn: Otopark, Bakım vb.)")
@@ -253,6 +288,7 @@ with tab2:
                 df_main = pd.concat([df_main, df_yeni], ignore_index=True)
                 save_data(worksheet, df_main)
                 st.success(f"'{masraf_turu_input_d}' masrafı başarıyla kaydedildi!")
+                st.rerun() # Sayfayı yenile
 
 
 # --- 5. SEKME 3: YAKIT ANALİZİ ---
@@ -320,7 +356,7 @@ with tab3:
                         "L/100km (Ort.)": f"{lt_100km:.2f}",
                         "TL/km (Ort.)": f"{tl_km:.2f}"
                     })
-            st.dataframe(pd.DataFrame(trip_raporlari), use_container_width=True)
+            st.dataframe(pd.DataFrame(trip_raporlari), hide_index=True, use_container_width=True)
 
         st.divider()
         
@@ -384,8 +420,8 @@ with tab4:
         bugun = datetime.now()
         bu_ay_baslangic = bugun.replace(day=1, hour=0, minute=0, second=0)
         
-        bu_ayki_odemeler = pd.DataFrame() # Boş DataFrame
-        if not odeme_df.empty: # Eğer ödeme kaydı varsa filtrele
+        bu_ayki_odemeler = pd.DataFrame()
+        if not odeme_df.empty: 
             bu_ayki_odemeler = odeme_df[
                 (odeme_df['Ödeme Tarihi'] >= pd.to_datetime(bu_ay_baslangic)) &
                 (odeme_df['Ödeme Tarihi'] < pd.to_datetime(bu_ay_baslangic + relativedelta(months=1)))
@@ -407,8 +443,8 @@ with tab4:
             if not kategori_df.empty:
                 kategori_toplam_harcama = kategori_df['Tutar'].sum()
                 
-                kategori_bu_ayki_odeme = 0 # Varsayılan
-                if not bu_ayki_odemeler.empty: # Eğer bu ay ödeme varsa hesapla
+                kategori_bu_ayki_odeme = 0
+                if not bu_ayki_odemeler.empty: 
                     kategori_bu_ayki_odeme = bu_ayki_odemeler[
                         bu_ayki_odemeler['Kategori'] == kategori
                     ]['Ödeme Tutarı'].sum()
@@ -490,20 +526,11 @@ with tab5:
         
         if st.button("Tüm Değişiklikleri Kalıcı Olarak Kaydet"):
             
-            # Değişiklikleri ana DataFrame'e yansıtmak için bir "birleştirme anahtarı" olmalı
-            # st.data_editor index'i korumaz, bu yüzden satırları eşleştirmek zor.
-            # En güvenli yol: Orijinal filtrelenmiş df'nin index'ini alıp, edited_df'ye eklemek
-            
-            # edited_df şu an index'siz. Orijinal filtrelenmiş df'nin index'ini (orijinal df_main'deki) kullanmalıyız.
-            # AMA data_editor index'leri kaybeder.
-            # ÇÖZÜM: Tüm df_main'i 'edited_df' ile (eşleşen sütunlara göre) GÜNCELLEMEK YERİNE,
-            # 'edited_df'yi df_main'in GÜNCEL HALİ olarak kabul etmek (filtre dışı kalanları ekleyerek)
-            
-            # 1. Filtre dışı kalan kayıtları bul
+            # Filtre dışı kalan kayıtları bul
             filtre_disi_df = df_main[~df_main.index.isin(filtrelenmis_df.index)].copy()
             
-            # 2. Düzenlenmiş veriyi (edited_df) al (bu zaten bir DataFrame)
-            # 3. İkisini birleştir
+            # Düzenlenmiş veriyi al
+            # Not: edited_df'deki veri tipleri bozulmuş olabilir, düzeltmeliyiz
             df_guncel = pd.concat([filtre_disi_df, edited_df], ignore_index=True)
 
             # Veri tiplerini tekrar doğrula
@@ -512,6 +539,9 @@ with tab5:
             for col in numeric_cols:
                 df_guncel[col] = pd.to_numeric(df_guncel[col], errors='coerce').fillna(0)
             df_guncel['Taksit Sayısı'] = df_guncel['Taksit Sayısı'].apply(lambda x: 1 if x < 1 else int(x))
+            
+            # Boş string'leri NaN yap (Dolum Türü için)
+            df_guncel = df_guncel.replace(r'^\s*$', pd.NA, regex=True)
 
             save_data(worksheet, df_guncel)
             st.success("Veritabanı (Google Sheets) başarıyla güncellendi!")
