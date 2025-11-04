@@ -5,8 +5,8 @@ from dateutil.relativedelta import relativedelta
 import gspread
 from google.oauth2.service_account import Credentials
 import os
-# import json (Artık gerek yok)
-# import re (Artık gerek yok)
+import json
+import re # Otomatik temizleme için
 
 # --- 1. UYGULA AYARLARI VE GOOGLE SHEETS BAĞLANTISI ---
 
@@ -54,12 +54,8 @@ def connect_to_sheet():
     
     try:
         # DENE: Streamlit Cloud (st.secrets) yolunu dene
-        # Bu sefer st.secrets.get() kullanarak hata vermesini engelliyoruz
         if st.secrets.get("GOOGLE_SHEETS_CREDENTIALS"):
-            # st.info("Streamlit Cloud 'secrets' bulundu.")
             try:
-                # JSON'ı okumak yerine, TOML'dan gelen SÖZLÜK (dict) yapısını
-                # doğrudan kullanıyoruz. Bu en güvenli yöntemdir.
                 creds_dict = st.secrets["GOOGLE_SHEETS_CREDENTIALS"]
                 creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
                 gc = gspread.authorize(creds)
@@ -69,12 +65,10 @@ def connect_to_sheet():
                 st.info("Secrets (TOML) formatını doğru girdiğinizden emin misiniz?")
                 st.stop()
         else:
-            # Secrets dosyası var ama içinde anahtar yoksa, bu da yereldir.
             raise st.errors.StreamlitSecretNotFoundError("Anahtar bulunamadı, yerel varsayılıyor.")
 
     except st.errors.StreamlitSecretNotFoundError:
         # HATA: Secrets dosyası bulunamadı (Yani YERELDE çalışıyoruz)
-        # st.info("Yerel 'google_credentials.json' dosyası aranıyor...")
         LOCAL_CREDS_PATH = "google_credentials.json"
         
         if not os.path.exists(LOCAL_CREDS_PATH):
@@ -89,7 +83,6 @@ def connect_to_sheet():
             st.error(f"Yerel 'google_credentials.json' dosyası ile kimlik doğrulama hatası: {e}")
             st.stop()
     except Exception as e:
-        # Diğer beklenmedik hatalar
         st.error(f"Kimlik doğrulama sırasında genel hata: {e}")
         st.stop()
 
@@ -129,9 +122,16 @@ def create_empty_dataframe():
     df['Litre'] = pd.to_numeric(df['Litre'])
     return df
 
+#
+# --- BU FONKSİYON GÜNCELLENDİ (Argüman kaldırıldı) ---
+#
 @st.cache_data(ttl=60)
-def load_data(worksheet):
+def load_data():
     """Google Sheets'ten veriyi yükler ve DataFrame'e dönüştürür."""
+    
+    # 1. Bağlantıyı içeride çağır
+    worksheet = connect_to_sheet() 
+    
     if worksheet is None:
         return create_empty_dataframe()
         
@@ -164,8 +164,15 @@ def load_data(worksheet):
         st.error(f"Veri yüklenirken hata oluştu: {e}")
         return create_empty_dataframe()
 
-def save_data(worksheet, df):
+#
+# --- BU FONKSİYON GÜNCELLENDİ (Argüman kaldırıldı) ---
+#
+def save_data(df):
     """DataFrame'i Google Sheets'e kaydeder."""
+    
+    # 1. Bağlantıyı içeride çağır
+    worksheet = connect_to_sheet()
+    
     if worksheet is None:
         st.error("Kaydedilecek yer bulunamadı (Worksheet bağlantısı yok).")
         return
@@ -187,9 +194,9 @@ def save_data(worksheet, df):
     except Exception as e:
         st.error(f"Veri kaydedilirken hata oluştu: {e}")
 
-# --- Ana Uygulama Akışı ---
-worksheet = connect_to_sheet() 
-df_main = load_data(worksheet) 
+# --- Ana Uygulama Akışı (GÜNCELLENDİ) ---
+# Artık worksheet'i burada çağırmıyoruz, sadece load_data'yı çağırıyoruz
+df_main = load_data() 
 
 # --- 2. SEKMELERİ OLUŞTURMA (5 SEKMELİ YAPI) ---
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
@@ -243,7 +250,7 @@ with tab1:
                 
                 df_yeni = pd.DataFrame([yeni_kayit])
                 df_main = pd.concat([df_main, df_yeni], ignore_index=True)
-                save_data(worksheet, df_main)
+                save_data(df_main) # <-- GÜNCELLENDİ (worksheet argümanı kaldırıldı)
                 st.success("Yakıt masrafı başarıyla kaydedildi!")
                 st.rerun() 
 
@@ -293,7 +300,7 @@ with tab2:
                 
                 df_yeni = pd.DataFrame([yeni_kayit])
                 df_main = pd.concat([df_main, df_yeni], ignore_index=True)
-                save_data(worksheet, df_main)
+                save_data(df_main) # <-- GÜNCELLENDİ (worksheet argümanı kaldırıldı)
                 st.success(f"'{masraf_turu_input_d}' masrafı başarıyla kaydedildi!")
                 st.rerun() 
 
@@ -549,6 +556,6 @@ with tab5:
             
             df_guncel = df_guncel.replace(r'^\s*$', pd.NA, regex=True)
 
-            save_data(worksheet, df_guncel)
+            save_data(df_guncel) # <-- GÜNCELLENDİ (worksheet argümanı kaldırıldı)
             st.success("Veritabanı (Google Sheets) başarıyla güncellendi!")
             st.rerun()
