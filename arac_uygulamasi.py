@@ -488,4 +488,4 @@ with tab5:
             filt_turler = st.multiselect("Masraf Türüne Göre Filtrele", options=df_main['Masraf Türü'].unique())
         with col2:
             min_date = df_main['Tarih'].min().date()
-            max_date = df_main['Tarih'].
+            max_date = df_main['Tarih']
