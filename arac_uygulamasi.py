@@ -19,10 +19,13 @@ KATEGORILER_TUMU = [
 KATEGORILER_DIGER = [k for k in KATEGORILER_TUMU if k != 'Yakıt']
 KM_GEREKEN_KATEGORILER = ['Periyodik Bakım', 'Tamir-Servis', 'Lastik', 'Muayene']
 
+#
+# --- HATA BURADAYDI, DÜZELTİLDİ ---
+#
 # Google Sheets'e bağlanmak için gerekli yetki kapsamları
 SCOPES = [
-    "https.www.googleapis.com/auth/spreadsheets",
-    "https.www.googleapis.com/auth/drive"
+    "https://www.googleapis.com/auth/spreadsheets", # <-- DÜZELTİLDİ
+    "https://www.googleapis.com/auth/drive"         # <-- DÜZELTİLDİ
 ]
 
 # Google E-Tablonuzun tam adı
@@ -121,7 +124,7 @@ def create_empty_dataframe():
     return df
 
 #
-# --- GÜNCELLENMİŞ FONKSİYON ---
+# --- SESSION STATE (Önbellek) KODU ---
 #
 def load_data():
     """Google Sheets'ten veriyi yükler ve DataFrame'e dönüştürür."""
@@ -160,9 +163,6 @@ def load_data():
         st.error(f"Veri yüklenirken hata oluştu: {e}")
         return create_empty_dataframe()
 
-#
-# --- GÜNCELLENMİŞ FONKSİYON ---
-#
 def save_data(df):
     """DataFrame'i Google Sheets'e kaydeder VE session_state'i günceller."""
     
@@ -192,7 +192,7 @@ def save_data(df):
         st.error(f"Veri kaydedilirken hata oluştu: {e}")
 
 #
-# --- Ana Uygulama Akışı (SESSION STATE EKLENDİ) ---
+# --- Ana Uygulama Akışı (SESSION STATE) ---
 #
 if "df_main" not in st.session_state:
     st.session_state.df_main = load_data() 
@@ -210,7 +210,7 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
 
 
 #
-# --- 3. SEKME 1: YAKIT MASRAFI GİRME (st.rerun() KALDIRILDI) ---
+# --- 3. SEKME 1: YAKIT MASRAFI GİRME (Sekme Atlama Hatası Düzeltildi) ---
 #
 with tab1:
     st.header("Yeni Yakıt Alımı Kaydı")
@@ -255,10 +255,10 @@ with tab1:
                 df_main_guncel = pd.concat([df_main, df_yeni], ignore_index=True)
                 save_data(df_main_guncel) 
                 st.success("Yakıt masrafı başarıyla kaydedildi!")
-                # st.rerun() KALDIRILDI! Form zaten kendi kendini temizliyor.
+                # st.rerun() KALDIRILDI!
 
 #
-# --- 4. SEKME 2: DİĞER MASRAFLARI GİRME (st.rerun() KALDIRILDI + MANUEL TEMİZLEME EKLENDİ) ---
+# --- 4. SEKME 2: DİĞER MASRAFLARI GİRME (Sekme Atlama ve KM Hatası Düzeltildi) ---
 #
 with tab2:
     st.header("Yeni Masraf Kaydı (Yakıt Dışı)")
