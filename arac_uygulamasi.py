@@ -10,18 +10,19 @@ import re # Otomatik temizleme için
 
 # --- 1. UYGULA AYARLARI VE GOOGLE SHEETS BAĞLANTISI ---
 
-# Masraf kategorilerimiz (GÜNCELLENDİ)
+# Masraf kategorilerimiz
 KATEGORILER_TUMU = [
     'Yakıt', 'Köprü Otoyol', 'Trafik Cezaları', 'Tamir-Servis', 
     'Periyodik Bakım', 'Muayene', 'Lastik', 'Aksesuar', 
     'Vergiler', 'Otopark', 'Araç Yıkama', 'Sigorta-Kasko'
 ]
 KATEGORILER_DIGER = [k for k in KATEGORILER_TUMU if k != 'Yakıt']
+KM_GEREKEN_KATEGORILER = ['Periyodik Bakım', 'Tamir-Servis', 'Lastik', 'Muayene']
 
 # Google Sheets'e bağlanmak için gerekli yetki kapsamları
 SCOPES = [
-    "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/drive"
+    "https.www.googleapis.com/auth/spreadsheets",
+    "https.www.googleapis.com/auth/drive"
 ]
 
 # Google E-Tablonuzun tam adı
@@ -44,7 +45,7 @@ st.set_page_config(
 st.title("🚗 Araç Masraf Takip Uygulaması")
 
 #
-# --- GÜNCELLENMİŞ BAĞLANTI KODU ---
+# --- BAĞLANTI KODU (DEĞİŞİKLİK YOK) ---
 #
 @st.cache_resource(ttl=60)
 def connect_to_sheet():
@@ -108,9 +109,6 @@ def connect_to_sheet():
     except Exception as e:
         st.error(f"E-Tabloya bağlanırken bilinmeyen bir hata oluştu: {e}")
         st.stop()
-#
-# --- GÜNCELLENEN BÖLÜMÜN SONU ---
-#
 
 def create_empty_dataframe():
     """Gerekli sütunlara sahip boş bir DataFrame oluşturur."""
@@ -125,7 +123,6 @@ def create_empty_dataframe():
 #
 # --- GÜNCELLENMİŞ FONKSİYON ---
 #
-@st.cache_data(ttl=60)
 def load_data():
     """Google Sheets'ten veriyi yükler ve DataFrame'e dönüştürür."""
     
@@ -167,7 +164,7 @@ def load_data():
 # --- GÜNCELLENMİŞ FONKSİYON ---
 #
 def save_data(df):
-    """DataFrame'i Google Sheets'e kaydeder."""
+    """DataFrame'i Google Sheets'e kaydeder VE session_state'i günceller."""
     
     worksheet = connect_to_sheet()
     
@@ -187,13 +184,20 @@ def save_data(df):
         worksheet.clear()
         worksheet.update([REQUIRED_COLUMNS] + df_sorted_str.values.tolist(), value_input_option='USER_ENTERED')
         
-        st.cache_data.clear()
+        # Hafızayı (session_state) GÜNCELLE
+        st.session_state.df_main = df_sorted.copy()
+        
         st.cache_resource.clear() 
     except Exception as e:
         st.error(f"Veri kaydedilirken hata oluştu: {e}")
 
-# --- Ana Uygulama Akışı (GÜNCELLENDİ) ---
-df_main = load_data() 
+#
+# --- Ana Uygulama Akışı (SESSION STATE EKLENDİ) ---
+#
+if "df_main" not in st.session_state:
+    st.session_state.df_main = load_data() 
+
+df_main = st.session_state.df_main
 
 # --- 2. SEKMELERİ OLUŞTURMA (5 SEKMELİ YAPI) ---
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
@@ -205,7 +209,9 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
 ])
 
 
-# --- 3. SEKME 1: YAKIT MASRAFI GİRME ---
+#
+# --- 3. SEKME 1: YAKIT MASRAFI GİRME (st.rerun() KALDIRILDI) ---
+#
 with tab1:
     st.header("Yeni Yakıt Alımı Kaydı")
     
@@ -246,86 +252,91 @@ with tab1:
                 }
                 
                 df_yeni = pd.DataFrame([yeni_kayit])
-                df_main = pd.concat([df_main, df_yeni], ignore_index=True)
-                save_data(df_main) 
+                df_main_guncel = pd.concat([df_main, df_yeni], ignore_index=True)
+                save_data(df_main_guncel) 
                 st.success("Yakıt masrafı başarıyla kaydedildi!")
-                st.rerun() 
+                # st.rerun() KALDIRILDI! Form zaten kendi kendini temizliyor.
 
 #
-# --- 4. SEKME 2: DİĞER MASRAFLARI GİRME (FORM KALDIRILDI) ---
+# --- 4. SEKME 2: DİĞER MASRAFLARI GİRME (st.rerun() KALDIRILDI + MANUEL TEMİZLEME EKLENDİ) ---
 #
 with tab2:
     st.header("Yeni Masraf Kaydı (Yakıt Dışı)")
 
-    # KM girmenin zorunlu/önemli olduğu kategoriler
-    km_gereken_kategoriler = ['Periyodik Bakım', 'Tamir-Servis', 'Lastik', 'Muayene']
-
     st.subheader("Masraf Detayları")
     
-    tarih_input_d = st.date_input("Tarih", value=datetime.now())
-    masraf_turu_input_d = st.selectbox("Masraf Türünü Seçin", options=KATEGORILER_DIGER) 
+    # Widget'lara 'key' (anahtar) ekledik
+    tarih_input_d = st.date_input("Tarih", value=datetime.now(), key="diger_tarih")
+    masraf_turu_input_d = st.selectbox("Masraf Türünü Seçin", options=KATEGORILER_DIGER, key="diger_tur") 
 
-    # KM Sayacını sadece GEREKLİ kategoriler için göster
     km_input_d = None
-    if masraf_turu_input_d in km_gereken_kategoriler:
+    if masraf_turu_input_d in KM_GEREKEN_KATEGORILER:
         km_input_d = st.number_input(
             "Aracın Güncel Kilometresi", 
             min_value=0, 
             step=1, 
-            value=int(df_main['KM Sayacı'].max()) if not df_main.empty else 0
+            value=int(df_main['KM Sayacı'].max()) if not df_main.empty else 0,
+            key="diger_km" # Buna da key verelim
         )
         st.info(f"'{masraf_turu_input_d}' için KM girmek, bakım ve parça ömrü takibi için önemlidir.")
     
     col3, col4 = st.columns(2)
     with col3:
-        diger_tutar_input = st.number_input("Toplam Masraf Tutarı (TL)", min_value=0.0, format="%.2f")
+        diger_tutar_input = st.number_input("Toplam Masraf Tutarı (TL)", min_value=0.0, format="%.2f", key="diger_tutar")
     with col4:
-        taksit_input = st.number_input("Taksit Sayısı", min_value=1, value=1, step=1)
+        taksit_input = st.number_input("Taksit Sayısı", min_value=1, value=1, step=1, key="diger_taksit")
     
-    aciklama_input_d = st.text_input("Masraf Açıklaması (Örn: 10.000km bakımı, İspark Otopark, Kasko Poliçesi)")
+    aciklama_input_d = st.text_input("Masraf Açıklaması (Örn: 10.000km bakımı, İspark Otopark, Kasko Poliçesi)", key="diger_aciklama")
 
-    # Form yerine normal bir buton
     submitted_d = st.button("Masrafı Kaydet")
     
     if submitted_d:
         # Girdileri kontrol et
-        is_km_required = masraf_turu_input_d in km_gereken_kategoriler
+        is_km_required = masraf_turu_input_d in KM_GEREKEN_KATEGORILER
         
-        if is_km_required and (km_input_d is None or km_input_d == 0):
+        # KM'yi state'den oku (eğer görünürse)
+        km_degeri = st.session_state.diger_km if is_km_required else None
+        
+        if is_km_required and (km_degeri is None or km_degeri == 0):
             st.error(f"'{masraf_turu_input_d}' için KM sayacı girmek zorunludur.")
-        elif diger_tutar_input == 0:
+        elif st.session_state.diger_tutar == 0:
              st.error("Lütfen masraf tutarını girin.")
-        elif not aciklama_input_d:
+        elif not st.session_state.diger_aciklama:
             st.error("Lütfen bir açıklama girin (Örn: Otopark, Bakım vb.)")
         else:
             # KM Gerekmiyorsa, son bilinen KM'yi otomatik ata
             kaydedilecek_km = 0
-            if km_input_d is not None:
+            if km_degeri is not None:
                 # KM girildiyse ve gerekliyse, KM'nin geriye gitmediğini kontrol et
-                if not df_main.empty and km_input_d < df_main['KM Sayacı'].max():
-                    st.error(f"Girdiğiniz KM ({km_input_d}), son kayıtlı KM'den ({int(df_main['KM Sayacı'].max())}) düşük olamaz.")
+                if not df_main.empty and km_degeri < df_main['KM Sayacı'].max():
+                    st.error(f"Girdiğiniz KM ({km_degeri}), son kayıtlı KM'den ({int(df_main['KM Sayacı'].max())}) düşük olamaz.")
                     st.stop() # Kaydı durdur
-                kaydedilecek_km = km_input_d
+                kaydedilecek_km = km_degeri
             else:
                 # KM girilmediyse (çünkü sorulmadı), son bilinen KM'yi al
                 kaydedilecek_km = int(df_main['KM Sayacı'].max()) if not df_main.empty else 0
             
             yeni_kayit = {
-                "Tarih": pd.to_datetime(tarih_input_d),
+                "Tarih": pd.to_datetime(st.session_state.diger_tarih),
                 "KM Sayacı": kaydedilecek_km,
-                "Masraf Türü": masraf_turu_input_d,
-                "Tutar": diger_tutar_input,
-                "Açıklama": aciklama_input_d,
-                "Taksit Sayısı": taksit_input,
+                "Masraf Türü": st.session_state.diger_tur,
+                "Tutar": st.session_state.diger_tutar,
+                "Açıklama": st.session_state.diger_aciklama,
+                "Taksit Sayısı": st.session_state.diger_taksit,
                 "Litre": 0,
                 "Dolum Türü": ""
             }
             
             df_yeni = pd.DataFrame([yeni_kayit])
-            df_main = pd.concat([df_main, df_yeni], ignore_index=True)
-            save_data(df_main) 
-            st.success(f"'{masraf_turu_input_d}' masrafı başarıyla kaydedildi!")
-            st.rerun() 
+            df_main_guncel = pd.concat([df_main, df_yeni], ignore_index=True)
+            save_data(df_main_guncel) 
+            st.success(f"'{st.session_state.diger_tur}' masrafı başarıyla kaydedildi!")
+            
+            # --- MANUEL ALAN TEMİZLEME (st.rerun() yerine) ---
+            st.session_state.diger_tutar = 0.0
+            st.session_state.diger_aciklama = ""
+            st.session_state.diger_taksit = 1
+            # st.rerun() KALDIRILDI!
 
 
 #
@@ -595,6 +606,6 @@ with tab5:
             
             df_guncel = df_guncel.replace(r'^\s*$', pd.NA, regex=True)
 
-            save_data(df_guncel) 
+            save_data(df_guncel) # Bu fonksiyon artık state'i de güncelliyor
             st.success("Veritabanı (Google Sheets) başarıyla güncellendi!")
             st.rerun()
