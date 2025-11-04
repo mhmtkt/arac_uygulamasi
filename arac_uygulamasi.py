@@ -4,14 +4,15 @@ from datetime import datetime
 from dateutil.relativedelta import relativedelta
 import gspread
 from google.oauth2.service_account import Credentials
-import os # Bu artık sadece yerel kontrol için
+import os
+import json # <-- YENİ EKLENDİ
 
-# --- 1. UYGULAMA AYARLARI VE GOOGLE SHEETS BAĞLANTISI ---
+# --- 1. UYGULA AYARLARI VE GOOGLE SHEETS BAĞLANTISI ---
 
 # Masraf kategorilerimiz
 KATEGORILER_TUMU = [
     'Yakıt', 'Köprü Otoyol', 'Trafik Cezaları', 'Tamir-Servis', 
-    'Perodik Bakım', 'Muayene', 'Lastik', 'Aksesuar', 
+    'Periyodik Bakım', 'Muayene', 'Lastik', 'Aksesuar', 
     'Vergiler', 'Otopark', 'Araç Yıkama'
 ]
 KATEGORILER_DIGER = [k for k in KATEGORILER_TUMU if k != 'Yakıt']
@@ -45,23 +46,23 @@ st.title("🚗 Araç Masraf Takip Uygulaması")
 def connect_to_sheet():
     """Google Sheets'e bağlanır ve çalışma sayfasını döndürür."""
     try:
-        # Streamlit Cloud'da (Deployment)
-        creds_dict = st.secrets["GOOGLE_SHEETS_CREDENTIALS"]
+        # Streamlit Cloud'da (Deployment) - GÜNCELLENMİŞ YÖNTEM
+        creds_json_str = st.secrets["GOOGLE_SHEETS_CREDENTIALS_JSON"]
+        creds_dict = json.loads(creds_json_str) # Metni JSON (dict) olarak yükle
         creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
         gc = gspread.authorize(creds)
-        st.success("Google Sheets (Cloud) bağlantısı başarılı!")
+        # st.success("Google Sheets (Cloud) bağlantısı başarılı!") # Başarı mesajını gizle
     except:
         # Yerel'de (Local)
-        # İndirdiğiniz JSON anahtar dosyasının adını buraya yazın
-        LOCAL_CREDS_PATH = "google_credentials.json" # <--- YEREL ANAHTARINIZIN ADI
+        LOCAL_CREDS_PATH = "google_credentials.json" # Yerel anahtarınızın adı
         
         if not os.path.exists(LOCAL_CREDS_PATH):
             st.error("Yerel 'google_credentials.json' dosyası bulunamadı.")
-            return None
+            st.stop() # Hata varsa uygulamayı durdur
         
         creds = Credentials.from_service_account_file(LOCAL_CREDS_PATH, scopes=SCOPES)
         gc = gspread.authorize(creds)
-        st.info("Google Sheets (Yerel) bağlantısı başarılı.")
+        # st.info("Google Sheets (Yerel) bağlantısı başarılı.") # Bilgi mesajını gizle
         
     try:
         sh = gc.open(GOOGLE_SHEET_NAME)
@@ -93,31 +94,26 @@ def load_data(worksheet):
     try:
         data = worksheet.get_all_values()
         
-        # Eğer sayfa boşsa (sadece başlıklar varsa veya o da yoksa)
         if len(data) < 2: 
             return create_empty_dataframe()
         
         headers = data[0]
-        # Başlıkların doğruluğunu kontrol et
         if headers != REQUIRED_COLUMNS:
             st.error(f"E-Tablo başlıkları hatalı! Gerekli: {REQUIRED_COLUMNS}")
             return create_empty_dataframe()
             
         df = pd.DataFrame(data[1:], columns=headers)
         
-        # --- Veri Tipi Dönüşümü (ÇOK ÖNEMLİ) ---
-        # Google Sheets'ten her şey 'string' olarak gelir
         df['Tarih'] = pd.to_datetime(df['Tarih'], errors='coerce')
         
-        # Sayısal alanlar
         numeric_cols = ['KM Sayacı', 'Tutar', 'Taksit Sayısı', 'Litre']
         for col in numeric_cols:
-            df[col] = pd.to_numeric(df[col].str.replace(',', '.'), errors='coerce').fillna(0) # 'coerce' hatalı veriyi NaT/NaN yapar, fillna(0) ile 0 yaparız
+            # Google Sheets'ten gelen '1.234,56' formatını düzeltmek için
+            df[col] = df[col].str.replace('.', '', regex=False).str.replace(',', '.', regex=False)
+            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
 
-        # Taksit Sayısı en az 1 olmalı
         df['Taksit Sayısı'] = df['Taksit Sayısı'].apply(lambda x: 1 if x < 1 else int(x))
         
-        # NaN/NaT olan tarihleri sil (bozuk veri)
         df = df.dropna(subset=['Tarih'])
         return df
         
@@ -132,30 +128,27 @@ def save_data(worksheet, df):
         return
         
     try:
-        # Kaydetmeden önce tarih ve km'ye göre sırala
         df_sorted = df.sort_values(by=["Tarih", "KM Sayacı"], ascending=True)
         
         # Google Sheets'e yazmadan önce formatı düzelt
-        # 1. Tarihleri 'YYYY-MM-DD' formatına çevir
         df_sorted['Tarih'] = df_sorted['Tarih'].dt.strftime('%Y-%m-%d')
-        # 2. NaN/NaT değerleri boş string yap
+        # Sayısal değerleri string'e dönüştürürken Google Sheets'in seveceği formata (virgül) getir
+        df_sorted['Tutar'] = df_sorted['Tutar'].apply(lambda x: f"{x:.2f}".replace('.', ','))
+        df_sorted['Litre'] = df_sorted['Litre'].apply(lambda x: f"{x:.2f}".replace('.', ','))
+
         df_sorted_str = df_sorted.fillna('').astype(str)
         
-        # Tüm sayfayı temizle
         worksheet.clear()
+        worksheet.update([REQUIRED_COLUMNS] + df_sorted_str.values.tolist(), value_input_option='USER_ENTERED')
         
-        # Başlıkları ve veriyi yaz
-        worksheet.update([REQUIRED_COLUMNS] + df_sorted_str.values.tolist())
-        
-        # Cache'i temizle
         st.cache_data.clear()
-        st.cache_resource.clear() # Bağlantıyı da temizle ki taze veri gelsin
+        st.cache_resource.clear() 
     except Exception as e:
         st.error(f"Veri kaydedilirken hata oluştu: {e}")
 
 # --- Ana Uygulama Akışı ---
-worksheet = connect_to_sheet() # Önce bağlantıyı kur
-df_main = load_data(worksheet) # Sonra veriyi yükle
+worksheet = connect_to_sheet() 
+df_main = load_data(worksheet) 
 
 # --- 2. SEKMELERİ OLUŞTURMA (5 SEKMELİ YAPI) ---
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
@@ -177,7 +170,7 @@ with tab1:
         with col1:
             tarih_input = st.date_input("Tarih", value=datetime.now())
         with col2:
-            km_input = st.number_input("Aracın Güncel Kilometresi", min_value=0, step=1)
+            km_input = st.number_input("Aracın Güncel Kilometresi", min_value=0, step=1, value=int(df_main['KM Sayacı'].max()) if not df_main.empty else 0)
         
         col3, col4 = st.columns(2)
         with col3:
@@ -193,6 +186,8 @@ with tab1:
         if submitted:
             if km_input == 0 or yakit_tutar_input == 0 or yakit_litre_input == 0:
                 st.error("Lütfen KM, Tutar ve Litre alanlarını doldurun.")
+            elif km_input < df_main['KM Sayacı'].max():
+                 st.error(f"Girdiğiniz KM ({km_input}), son kayıtlı KM'den ({int(df_main['KM Sayacı'].max())}) düşük olamaz.")
             else:
                 yeni_kayit = {
                     "Tarih": pd.to_datetime(tarih_input),
@@ -221,7 +216,7 @@ with tab2:
         with col1:
             tarih_input_d = st.date_input("Tarih", value=datetime.now())
         with col2:
-            km_input_d = st.number_input("Aracın Güncel Kilometresi", min_value=0, step=1)
+            km_input_d = st.number_input("Aracın Güncel Kilometresi", min_value=0, step=1, value=int(df_main['KM Sayacı'].max()) if not df_main.empty else 0)
 
         masraf_turu_input_d = st.selectbox("Masraf Türünü Seçin", options=KATEGORILER_DIGER) 
 
@@ -238,6 +233,8 @@ with tab2:
         if submitted_d:
             if km_input_d == 0 or diger_tutar_input == 0:
                 st.error("Lütfen KM ve Tutar alanlarını doldurun.")
+            elif km_input_d < df_main['KM Sayacı'].max():
+                 st.error(f"Girdiğiniz KM ({km_input_d}), son kayıtlı KM'den ({int(df_main['KM Sayacı'].max())}) düşük olamaz.")
             elif not aciklama_input_d:
                 st.error("Lütfen bir açıklama girin (Örn: Otopark, Bakım vb.)")
             else:
@@ -248,8 +245,8 @@ with tab2:
                     "Tutar": diger_tutar_input,
                     "Açıklama": aciklama_input_d,
                     "Taksit Sayısı": taksit_input,
-                    "Litre": 0, # Yakıt dışı masraf (NaN/None yerine 0)
-                    "Dolum Türü": "" # Yakıt dışı masraf (NaN/None yerine boş string)
+                    "Litre": 0,
+                    "Dolum Türü": ""
                 }
                 
                 df_yeni = pd.DataFrame([yeni_kayit])
@@ -316,9 +313,9 @@ with tab3:
                     tl_km = harcanan_para / gidilen_km
                     
                     trip_raporlari.append({
-                        "Başlangıç KM": baslangic_km,
-                        "Bitiş KM": bitis_km,
-                        "Gidilen KM": gidilen_km,
+                        "Başlangıç KM": int(baslangic_km),
+                        "Bitiş KM": int(bitis_km),
+                        "Gidilen KM": int(gidilen_km),
                         "Tüketilen Litre": f"{tuketilen_litre:.2f}",
                         "L/100km (Ort.)": f"{lt_100km:.2f}",
                         "TL/km (Ort.)": f"{tl_km:.2f}"
@@ -342,7 +339,7 @@ with tab3:
             )
             
             aylik_ozet['Toplam_Gidilen_KM'] = aylik_gidilen_km
-            aylik_ozet = aylik_ozet[aylik_ozet['Toplam_Gidilen_KM'] >= 0] # Sadece ay içi KM olanları al
+            aylik_ozet = aylik_ozet[aylik_ozet['Toplam_Gidilen_KM'] >= 0] 
             
             aylik_ozet['Aylık_Ort_L_100km'] = 0.0
             aylik_ozet['Aylık_Ort_TL_km'] = 0.0
@@ -372,7 +369,7 @@ with tab4:
     else:
         odeme_kayitlari = []
         for _, row in df_main.iterrows():
-            if row['Taksit Sayısı'] == 0: continue # Hatalı veriyi atla
+            if row['Taksit Sayısı'] == 0: continue 
             taksit_tutari = row['Tutar'] / row['Taksit Sayısı']
             for i in range(int(row['Taksit Sayısı'])):
                 odeme_tarihi = row['Tarih'] + relativedelta(months=i)
@@ -387,13 +384,15 @@ with tab4:
         bugun = datetime.now()
         bu_ay_baslangic = bugun.replace(day=1, hour=0, minute=0, second=0)
         
-        bu_ayki_odemeler = odeme_df[
-            (odeme_df['Ödeme Tarihi'] >= pd.to_datetime(bu_ay_baslangic)) &
-            (odeme_df['Ödeme Tarihi'] < pd.to_datetime(bu_ay_baslangic + relativedelta(months=1)))
-        ]
+        bu_ayki_odemeler = pd.DataFrame() # Boş DataFrame
+        if not odeme_df.empty: # Eğer ödeme kaydı varsa filtrele
+            bu_ayki_odemeler = odeme_df[
+                (odeme_df['Ödeme Tarihi'] >= pd.to_datetime(bu_ay_baslangic)) &
+                (odeme_df['Ödeme Tarihi'] < pd.to_datetime(bu_ay_baslangic + relativedelta(months=1)))
+            ]
         
         toplam_harcama = df_main['Tutar'].sum()
-        bu_ayki_toplam_odeme = bu_ayki_odemeler['Ödeme Tutarı'].sum()
+        bu_ayki_toplam_odeme = bu_ayki_odemeler['Ödeme Tutarı'].sum() if not bu_ayki_odemeler.empty else 0
 
         col1, col2 = st.columns(2)
         col1.metric("Tüm Zamanlar Toplam Harcama", f"{toplam_harcama:,.2f} TL")
@@ -408,9 +407,11 @@ with tab4:
             if not kategori_df.empty:
                 kategori_toplam_harcama = kategori_df['Tutar'].sum()
                 
-                kategori_bu_ayki_odeme = bu_ayki_odemeler[
-                    bu_ayki_odemeler['Kategori'] == kategori
-                ]['Ödeme Tutarı'].sum()
+                kategori_bu_ayki_odeme = 0 # Varsayılan
+                if not bu_ayki_odemeler.empty: # Eğer bu ay ödeme varsa hesapla
+                    kategori_bu_ayki_odeme = bu_ayki_odemeler[
+                        bu_ayki_odemeler['Kategori'] == kategori
+                    ]['Ödeme Tutarı'].sum()
                 
                 expander_title = (
                     f"**{kategori}** | "
@@ -421,7 +422,14 @@ with tab4:
                 with st.expander(expander_title):
                     st.dataframe(
                         kategori_df[["Tarih", "KM Sayacı", "Tutar", "Açıklama", "Taksit Sayısı"]].sort_values("Tarih", ascending=False),
-                        use_container_width=True
+                        hide_index=True,
+                        use_container_width=True,
+                         column_config={
+                            "Tarih": st.column_config.DateColumn("Tarih", format="YYYY-MM-DD"),
+                            "Tutar": st.column_config.NumberColumn("Tutar", format="%.2f TL"),
+                            "KM Sayacı": st.column_config.NumberColumn("KM Sayacı", format="%d km"),
+                            "Taksit Sayısı": st.column_config.NumberColumn("Taksit Sayısı", format="%d"),
+                        }
                     )
 
 # --- 7. SEKME 5: VERİ YÖNETİMİ ---
@@ -461,13 +469,13 @@ with tab5:
         st.subheader("Kayıtları Düzenle veya Sil")
         st.info("Bir hücreyi düzenlemek için üzerine çift tıklayın. Bir kaydı silmek için satırın başındaki kutucuğu seçip klavyenizdeki 'Delete' tuşuna basın.")
         
-        # 'data_editor' için 'Tarih' sütununu tekrar formatla (en iyi DateColumn ile çalışır)
         editor_df = filtrelenmis_df.copy()
         
         edited_df = st.data_editor(
             editor_df,
             num_rows="dynamic",
             use_container_width=True,
+            hide_index=True,
             column_config={
                 "Tarih": st.column_config.DateColumn("Tarih", format="YYYY-MM-DD", step=1),
                 "Tutar": st.column_config.NumberColumn("Tutar", format="%.2f TL", step=0.01),
@@ -481,18 +489,30 @@ with tab5:
         st.divider()
         
         if st.button("Tüm Değişiklikleri Kalıcı Olarak Kaydet"):
-            # Değişiklikleri tüm ana DataFrame (df_main) üzerinde uygula
             
-            # 1. Silinen satırları bul ve df_main'den çıkar
-            silinecek_indexler = set(filtrelenmis_df.index) - set(edited_df.index)
-            df_main_guncel = df_main.drop(index=silinecek_indexler)
-
-            # 2. Düzenlenen veriyi df_main'de güncelle
-            df_main_guncel.update(edited_df)
-
-            # 3. Veri tiplerini tekrar doğrula (özellikle Tarih)
-            df_main_guncel['Tarih'] = pd.to_datetime(df_main_guncel['Tarih'])
+            # Değişiklikleri ana DataFrame'e yansıtmak için bir "birleştirme anahtarı" olmalı
+            # st.data_editor index'i korumaz, bu yüzden satırları eşleştirmek zor.
+            # En güvenli yol: Orijinal filtrelenmiş df'nin index'ini alıp, edited_df'ye eklemek
             
-            save_data(worksheet, df_main_guncel)
+            # edited_df şu an index'siz. Orijinal filtrelenmiş df'nin index'ini (orijinal df_main'deki) kullanmalıyız.
+            # AMA data_editor index'leri kaybeder.
+            # ÇÖZÜM: Tüm df_main'i 'edited_df' ile (eşleşen sütunlara göre) GÜNCELLEMEK YERİNE,
+            # 'edited_df'yi df_main'in GÜNCEL HALİ olarak kabul etmek (filtre dışı kalanları ekleyerek)
+            
+            # 1. Filtre dışı kalan kayıtları bul
+            filtre_disi_df = df_main[~df_main.index.isin(filtrelenmis_df.index)].copy()
+            
+            # 2. Düzenlenmiş veriyi (edited_df) al (bu zaten bir DataFrame)
+            # 3. İkisini birleştir
+            df_guncel = pd.concat([filtre_disi_df, edited_df], ignore_index=True)
+
+            # Veri tiplerini tekrar doğrula
+            df_guncel['Tarih'] = pd.to_datetime(df_guncel['Tarih'])
+            numeric_cols = ['KM Sayacı', 'Tutar', 'Taksit Sayısı', 'Litre']
+            for col in numeric_cols:
+                df_guncel[col] = pd.to_numeric(df_guncel[col], errors='coerce').fillna(0)
+            df_guncel['Taksit Sayısı'] = df_guncel['Taksit Sayısı'].apply(lambda x: 1 if x < 1 else int(x))
+
+            save_data(worksheet, df_guncel)
             st.success("Veritabanı (Google Sheets) başarıyla güncellendi!")
-            st.rerun() # Sayfayı taze veriyle yeniden yükle
+            st.rerun()
