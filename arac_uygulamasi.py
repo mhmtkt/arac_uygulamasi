@@ -252,7 +252,7 @@ with tab1:
                 st.rerun() 
 
 #
-# --- 4. SEKME 2: DİĞER MASRAFLARI GİRME (BU BÖLÜMÜN TAMAMI GÜNCELLENDİ) ---
+# --- 4. SEKME 2: DİĞER MASRAFLARI GİRME (FORM KALDIRILDI) ---
 #
 with tab2:
     st.header("Yeni Masraf Kaydı (Yakıt Dışı)")
@@ -260,72 +260,72 @@ with tab2:
     # KM girmenin zorunlu/önemli olduğu kategoriler
     km_gereken_kategoriler = ['Periyodik Bakım', 'Tamir-Servis', 'Lastik', 'Muayene']
 
-    with st.form("diger_masraf_formu", clear_on_submit=True):
-        st.subheader("Masraf Detayları")
-        
-        tarih_input_d = st.date_input("Tarih", value=datetime.now())
-        masraf_turu_input_d = st.selectbox("Masraf Türünü Seçin", options=KATEGORILER_DIGER) 
+    st.subheader("Masraf Detayları")
+    
+    tarih_input_d = st.date_input("Tarih", value=datetime.now())
+    masraf_turu_input_d = st.selectbox("Masraf Türünü Seçin", options=KATEGORILER_DIGER) 
 
-        # KM Sayacını sadece GEREKLİ kategoriler için göster
-        km_input_d = None
-        if masraf_turu_input_d in km_gereken_kategoriler:
-            km_input_d = st.number_input(
-                "Aracın Güncel Kilometresi", 
-                min_value=0, 
-                step=1, 
-                value=int(df_main['KM Sayacı'].max()) if not df_main.empty else 0
-            )
-            st.info(f"'{masraf_turu_input_d}' için KM girmek, bakım ve parça ömrü takibi için önemlidir.")
-        
-        col3, col4 = st.columns(2)
-        with col3:
-            diger_tutar_input = st.number_input("Toplam Masraf Tutarı (TL)", min_value=0.0, format="%.2f")
-        with col4:
-            taksit_input = st.number_input("Taksit Sayısı", min_value=1, value=1, step=1)
-        
-        aciklama_input_d = st.text_input("Masraf Açıklaması (Örn: 10.000km bakımı, İspark Otopark, Kasko Poliçesi)")
+    # KM Sayacını sadece GEREKLİ kategoriler için göster
+    km_input_d = None
+    if masraf_turu_input_d in km_gereken_kategoriler:
+        km_input_d = st.number_input(
+            "Aracın Güncel Kilometresi", 
+            min_value=0, 
+            step=1, 
+            value=int(df_main['KM Sayacı'].max()) if not df_main.empty else 0
+        )
+        st.info(f"'{masraf_turu_input_d}' için KM girmek, bakım ve parça ömrü takibi için önemlidir.")
+    
+    col3, col4 = st.columns(2)
+    with col3:
+        diger_tutar_input = st.number_input("Toplam Masraf Tutarı (TL)", min_value=0.0, format="%.2f")
+    with col4:
+        taksit_input = st.number_input("Taksit Sayısı", min_value=1, value=1, step=1)
+    
+    aciklama_input_d = st.text_input("Masraf Açıklaması (Örn: 10.000km bakımı, İspark Otopark, Kasko Poliçesi)")
 
-        submitted_d = st.form_submit_button("Masrafı Kaydet")
+    # Form yerine normal bir buton
+    submitted_d = st.button("Masrafı Kaydet")
+    
+    if submitted_d:
+        # Girdileri kontrol et
+        is_km_required = masraf_turu_input_d in km_gereken_kategoriler
         
-        if submitted_d:
-            # Girdileri kontrol et
-            is_km_required = masraf_turu_input_d in km_gereken_kategoriler
-            
-            if is_km_required and (km_input_d is None or km_input_d == 0):
-                st.error(f"'{masraf_turu_input_d}' için KM sayacı girmek zorunludur.")
-            elif diger_tutar_input == 0:
-                 st.error("Lütfen masraf tutarını girin.")
-            elif not aciklama_input_d:
-                st.error("Lütfen bir açıklama girin (Örn: Otopark, Bakım vb.)")
+        if is_km_required and (km_input_d is None or km_input_d == 0):
+            st.error(f"'{masraf_turu_input_d}' için KM sayacı girmek zorunludur.")
+        elif diger_tutar_input == 0:
+             st.error("Lütfen masraf tutarını girin.")
+        elif not aciklama_input_d:
+            st.error("Lütfen bir açıklama girin (Örn: Otopark, Bakım vb.)")
+        else:
+            # KM Gerekmiyorsa, son bilinen KM'yi otomatik ata
+            kaydedilecek_km = 0
+            if km_input_d is not None:
+                # KM girildiyse ve gerekliyse, KM'nin geriye gitmediğini kontrol et
+                if not df_main.empty and km_input_d < df_main['KM Sayacı'].max():
+                    st.error(f"Girdiğiniz KM ({km_input_d}), son kayıtlı KM'den ({int(df_main['KM Sayacı'].max())}) düşük olamaz.")
+                    st.stop() # Kaydı durdur
+                kaydedilecek_km = km_input_d
             else:
-                # KM Gerekmiyorsa, son bilinen KM'yi otomatik ata
-                kaydedilecek_km = 0
-                if km_input_d is not None:
-                    # KM girildiyse ve gerekliyse, KM'nin geriye gitmediğini kontrol et
-                    if not df_main.empty and km_input_d < df_main['KM Sayacı'].max():
-                        st.error(f"Girdiğiniz KM ({km_input_d}), son kayıtlı KM'den ({int(df_main['KM Sayacı'].max())}) düşük olamaz.")
-                        st.stop() # Kaydı durdur
-                    kaydedilecek_km = km_input_d
-                else:
-                    # KM girilmediyse (çünkü sorulmadı), son bilinen KM'yi al
-                    kaydedilecek_km = int(df_main['KM Sayacı'].max()) if not df_main.empty else 0
-                
-                yeni_kayit = {
-                    "Tarih": pd.to_datetime(tarih_input_d),
-                    "KM Sayacı": kaydedilecek_km,
-                    "Masraf Türü": masraf_turu_input_d,
-                    "Tutar": diger_tutar_input,
-                    "Açıklama": aciklama_input_d,
-                    "Taksit Sayısı": taksit_input,
-                    "Litre": 0,
-                    "Dolum Türü": ""
-                }
-                
-                df_yeni = pd.DataFrame([yeni_kayit])
-                df_main = pd.concat([df_main, df_yeni], ignore_index=True)
-                save_data(df_main) 
-                st.success(f"'{masraf_turu_input_d}' masrafı başarıyla kaydedildi!")
-                st.rerun() 
+                # KM girilmediyse (çünkü sorulmadı), son bilinen KM'yi al
+                kaydedilecek_km = int(df_main['KM Sayacı'].max()) if not df_main.empty else 0
+            
+            yeni_kayit = {
+                "Tarih": pd.to_datetime(tarih_input_d),
+                "KM Sayacı": kaydedilecek_km,
+                "Masraf Türü": masraf_turu_input_d,
+                "Tutar": diger_tutar_input,
+                "Açıklama": aciklama_input_d,
+                "Taksit Sayısı": taksit_input,
+                "Litre": 0,
+                "Dolum Türü": ""
+            }
+            
+            df_yeni = pd.DataFrame([yeni_kayit])
+            df_main = pd.concat([df_main, df_yeni], ignore_index=True)
+            save_data(df_main) 
+            st.success(f"'{masraf_turu_input_d}' masrafı başarıyla kaydedildi!")
+            st.rerun() 
 
 
 #
